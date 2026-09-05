@@ -20,5 +20,4 @@ beside it.
 /.opencode-skills/
 
 # Security: protect files with sensitive credentials
-src/pages/LoginPage.tsx
 AUDITORIA_*.md
