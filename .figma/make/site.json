@@ -1,0 +1,14 @@
+{
+  "language": "es",
+  "description": "Streamlines workforce planning by enabling analysts to upload data, access dashboards, perform analyses, manage actions, and configure settings in one platform.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  },
+  "customScripts": {
+    "headEnd": "<meta name=\"google\" content=\"notranslate\">"
+  }
+}
