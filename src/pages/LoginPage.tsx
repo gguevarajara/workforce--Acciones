@@ -23,10 +23,15 @@ interface Props {
  * Para agregar o cambiar usuarios, edita este arreglo.
  */
 const VALID_CREDENTIALS: { email: string; password: string }[] = [
-  // Credenciales de ejemplo para producción
-  // En un entorno real, usar variables de entorno o backend
-  { email: "admin@workforce.com", password: "Workforce2026" },
-  { email: "demo@workforce.com", password: "Demo2026" },
+  // Credenciales configuradas por variables de entorno o valores por defecto
+  { 
+    email: import.meta.env.VITE_ADMIN_EMAIL || "admin@workforce.com", 
+    password: import.meta.env.VITE_ADMIN_PASSWORD || "Workforce2026" 
+  },
+  { 
+    email: import.meta.env.VITE_DEMO_EMAIL || "demo@workforce.com", 
+    password: import.meta.env.VITE_DEMO_PASSWORD || "Demo2026" 
+  },
 ];
 
 function normalizeEmail(value: string): string {
