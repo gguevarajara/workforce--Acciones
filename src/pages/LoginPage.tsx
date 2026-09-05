@@ -25,8 +25,8 @@ interface Props {
 const VALID_CREDENTIALS: { email: string; password: string }[] = [
   // Credenciales configuradas por variables de entorno o valores por defecto
   { 
-    email: import.meta.env.VITE_ADMIN_EMAIL || "admin@workforce.com", 
-    password: import.meta.env.VITE_ADMIN_PASSWORD || "Workforce2026" 
+    email: import.meta.env.VITE_ADMIN_EMAIL || "gguevarajara@gmail.com", 
+    password: import.meta.env.VITE_ADMIN_PASSWORD || "Acuario03*" 
   },
   { 
     email: import.meta.env.VITE_DEMO_EMAIL || "demo@workforce.com", 
