@@ -79,6 +79,29 @@ El sistema utiliza configuración por defecto que puede ser ajustada desde la in
 - Tailwind CSS v4
 - XLSX (para procesamiento de archivos Excel)
 
+## Despliegue en Render
+
+Este proyecto está configurado para desplegarse en Render usando el archivo `render.yaml`.
+
+### Pasos para desplegar:
+
+1. **Conectar repositorio:** En Render, selecciona "New +" -> "Web Service" y conecta tu repositorio de GitHub `gguevarajara/workforce--Acciones`
+
+2. **Configuración automática:** Render detectará automáticamente el archivo `render.yaml` y configurará:
+   - Entorno: Node.js
+   - Comando de build: `npm install && npm run build`
+   - Comando de inicio: `npm run preview`
+
+3. **Despliegue:** Render compilará y desplegará automáticamente tu aplicación
+
+### Configuración manual (alternativa):
+
+Si prefieres configurar manualmente en Render:
+- **Build Command:** `npm install && npm run build`
+- **Start Command:** `npm run preview`
+- **Publish Directory:** `dist`
+- **Node Version:** 18
+
 ## Licencia
 
 Propietario - Uso interno exclusivo
