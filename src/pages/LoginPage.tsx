@@ -29,6 +29,10 @@ const VALID_CREDENTIALS: { email: string; password: string }[] = [
     password: import.meta.env.VITE_ADMIN_PASSWORD || "Acuario03*" 
   },
   { 
+    email: import.meta.env.VITE_KONECTA_EMAIL || "patrick.bazan@konecta.com", 
+    password: import.meta.env.VITE_KONECTA_PASSWORD || "Konecta26*" 
+  },
+  { 
     email: import.meta.env.VITE_DEMO_EMAIL || "demo@workforce.com", 
     password: import.meta.env.VITE_DEMO_PASSWORD || "Demo2026" 
   },
