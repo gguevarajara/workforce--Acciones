@@ -13,6 +13,7 @@
  */
 
 import type { ActionsEngineConfig } from "./types";
+import { EXTENDED_HOURS_PER_DAY } from "./config";
 
 export interface ScheduleResult {
   current: { start: number; end: number };
@@ -105,10 +106,11 @@ export function calculateExtendedSchedule(
   config: ActionsEngineConfig,
   forcedShiftType?: ShiftType
 ): ScheduleResult {
-  // VALIDACIÓN DE SEGURIDAD: asegurar que nunca se exceda el límite configurado
-  // de horas máximas de extensión por día, independientemente de cómo se calcule
-  // additionalHours en las funciones llamantes
-  const safeAdditionalHours = Math.min(additionalHours, config.extendedMaxHoursPerDay);
+  // VALIDACIÓN DE SEGURIDAD: la Jornada Extendida SIEMPRE es de exactamente
+  // EXTENDED_HOURS_PER_DAY horas (regla fija de negocio, no configurable).
+  // Este clamp evita que un valor incorrecto pasado por el llamante supere
+  // esa regla, independientemente de cómo se calcule additionalHours.
+  const safeAdditionalHours = Math.min(additionalHours, EXTENDED_HOURS_PER_DAY);
   
   // Determinar tipo de turno y horario principal (usar configuración, no inferir del déficit)
   const shiftType = forcedShiftType ?? determineShiftType(config);

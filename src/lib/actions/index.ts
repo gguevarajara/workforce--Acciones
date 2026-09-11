@@ -135,6 +135,15 @@ export function generateActions(
 
 // Re-exportar tipos y configuración para uso externo
 export type { ActionSuggestion, ActionsEngineConfig, GeneratedActions, CoverageBase, ActionType } from "./types";
-export { DEFAULT_ENGINE_CONFIG, getTotalWorkDuration, EDGE_WINDOW_HOURS, FULL_DAY_OFF_HOURS, ACTIONS_CONFIG_STORAGE_KEY } from "./config";
+export {
+  DEFAULT_ENGINE_CONFIG,
+  getTotalWorkDuration,
+  EXTENDED_HOURS_PER_DAY,
+  EXTENDED_DAYS_PER_WEEK,
+  EXTENDED_RETURN_BLOCK_HOURS,
+  EXTENDED_PRIORITY_RETURN_DAY,
+  EXTENDED_RETURN_UTILIZATION,
+  ACTIONS_CONFIG_STORAGE_KEY,
+} from "./config";
 export { LAYER_TOLERANCE_AGENTS, HHEE_MIN_DEFICIT_AGENTS } from "./hhee";
 export { calculateExtendedSchedule, determineShiftType, getPrincipalSchedule } from "./scheduleCalculator";

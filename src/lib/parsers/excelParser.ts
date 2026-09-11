@@ -74,13 +74,13 @@ function isoDate(d: Date): string {
  *  12 Pron. %TNP
  *  13 Plan.Disponibles  → Disponible (Requerido)
  *  14 RAC_s Plan. Logueados
- *  15 Prog.Disponibles  → Disponible (Oficiales)
+ *  15 Prog.Disponibles
  *  16 Prog.Logueados
  *  17 Racs Prog sin ausentismo
  *  18 Ocupación planificada
  *  19 Ocupación programada
  *  20 Avail de diseño
- *  21 RAC_s Prog. Disponibles SIN OJT
+ *  21 RAC_s Prog. Disponibles SIN OJT  → Disponible (Oficiales)
  *  22 RAC_s Prog. Logueados SIN OJT
  *  23 RAC_s Prog. Logueados SIN AUSENTISMO SIN OJT
  *  24 Break
@@ -96,7 +96,7 @@ export function parseRow(raw: unknown[]): Row | null {
   if (!raw || raw.length < 31) return null;
 
   // Validar columnas críticas para el análisis
-  const requiredIndices = [1, 2, 3, 4, 13, 15, 26, 30]; // Sub área, Servicio, Fecha, Hora, y columnas de disponibilidad
+  const requiredIndices = [1, 2, 3, 4, 13, 21, 26, 30]; // Sub área, Servicio, Fecha, Hora, y columnas de disponibilidad
   for (const idx of requiredIndices) {
     if (raw[idx] === undefined || raw[idx] === null) {
       console.warn(`Columna crítica ${idx} está vacía o undefined en la fila`);
@@ -124,7 +124,7 @@ export function parseRow(raw: unknown[]): Row | null {
   const n = (idx: number) => parseFloat(String(raw[idx] ?? 0)) || 0;
 
   const dispRequerido = n(13);
-  const dispOficiales = n(15);
+  const dispOficiales = n(21);
   const dispOficialesHhee = n(26);
   const dispOficialesHheeOjt = n(30);
 
@@ -156,7 +156,7 @@ export function validateExcelStructure(headers: unknown[]): { valid: boolean; mi
     { index: 3, name: "Fecha" },
     { index: 4, name: "Intervalo (hora)" },
     { index: 13, name: "Plan.Disponibles (Requerido)" },
-    { index: 15, name: "Prog.Disponibles (Oficiales)" },
+    { index: 21, name: "RAC_s Prog. Disponibles SIN OJT (Oficiales)" },
     { index: 26, name: "RAC_s Prog. Disponibles (Oficiales + HHEE)" },
     { index: 30, name: "RAC_s Prog. Disponibles (Oficiales + HHEE + OJT)" },
   ];

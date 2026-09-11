@@ -10,14 +10,24 @@ import type { ActionsEngineConfig } from "./types";
 // desincronizarse por tener cada uno su propio literal.
 export const ACTIONS_CONFIG_STORAGE_KEY = "workforce_actions_config";
 
-// Parámetros internos del motor de Jornadas Extendidas y Cambio de Horario.
-// Antes eran editables desde Configuración; ahora quedan fijos para no
-// alterar el comportamiento del módulo Acciones.
-export const EDGE_WINDOW_HOURS = 2;
-// Umbral a partir del cual un gap positivo se considera "día completo" y,
-// si se consume por completo, se reporta como día libre en vez de un
-// horario reducido.
-export const FULL_DAY_OFF_HOURS = 8;
+// --- Jornadas Extendidas: reglas fijas de negocio (NO configurables) ---
+// La lógica corregida exige una estructura rígida: siempre 2 días, siempre
+// 2h por día, siempre un único bloque continuo de 4h de devolución,
+// posicionado en una de las 2 mitades fijas del horario principal (antes o
+// después del break). Ya no son parámetros que el usuario pueda ajustar.
+export const EXTENDED_HOURS_PER_DAY = 2;
+export const EXTENDED_DAYS_PER_WEEK = 2;
+export const EXTENDED_RETURN_BLOCK_HOURS = EXTENDED_HOURS_PER_DAY * EXTENDED_DAYS_PER_WEEK; // 4h
+// Día que se prioriza al buscar el GAP positivo continuo de devolución,
+// siempre que exista disponibilidad ese día.
+export const EXTENDED_PRIORITY_RETURN_DAY = "Sábado";
+// Cuánto del excedente promedio disponible durante la ventana de devolución
+// se puede usar realmente para pagar horas sin generar un déficit nuevo ahí
+// mismo. Ej: si en esa ventana hay en promedio 11 agentes de excedente, solo
+// se puede "gastar" el 80% (≈8 agentes) — el resto queda de colchón. El
+// número final de agentes de la Jornada Extendida queda limitado por esto,
+// no solo por el déficit del día que se extiende (ver jornadasExtendidas.ts).
+export const EXTENDED_RETURN_UTILIZATION = 0.8;
 
 export const DEFAULT_ENGINE_CONFIG: ActionsEngineConfig = {
   minDeficit: 1,
@@ -57,10 +67,6 @@ export const DEFAULT_ENGINE_CONFIG: ActionsEngineConfig = {
   zoneMadrugadaStartMinutes: 22 * 60, // 22:00
   zoneMadrugadaEndMinutes: 6 * 60,    // 06:00 (cruza medianoche: 22:00 → 06:00)
   zoneBalancingWeight: 20,
-  // Valores default = comportamiento actual (equivalentes a los fijos que
-  // tenía el motor antes: 2h por día, sin límite de días por semana).
-  extendedMaxHoursPerDay: 2,
-  extendedMaxDaysPerWeek: 7,
 };
 
 /**

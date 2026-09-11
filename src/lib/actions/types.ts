@@ -142,14 +142,10 @@ export interface ActionsEngineConfig {
   // incluso a costa de un poco de mejora total.
   zoneBalancingWeight: number;
   // --- Configuración de Jornadas Extendidas ---
-  // Máximo de horas adicionales que se le puede sumar al horario estándar
-  // de un turno (mañana/tarde) en un mismo día.
-  extendedMaxHoursPerDay: number;
-  // Máximo de días distintos por semana, dentro de un mismo servicio+subárea,
-  // en los que se puede aplicar Jornada Extendida. Cuando hay más días con
-  // necesidad de extensión que este límite, se priorizan los días con mayor
-  // déficit. Valor 7 = sin restricción (se puede extender cualquier día).
-  extendedMaxDaysPerWeek: number;
+  // NOTA: la cantidad de horas por día (2h), la cantidad de días por semana
+  // (2) y el tamaño del bloque de devolución (4h continuas) ya NO son
+  // configurables: son reglas fijas de negocio (ver EXTENDED_HOURS_PER_DAY,
+  // EXTENDED_DAYS_PER_WEEK y EXTENDED_RETURN_BLOCK_HOURS en config.ts).
 }
 
 /**

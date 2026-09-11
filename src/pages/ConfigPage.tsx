@@ -1,8 +1,11 @@
 import { useState, useEffect } from "react";
 import {
   DEFAULT_ENGINE_CONFIG,
-  EDGE_WINDOW_HOURS,
-  FULL_DAY_OFF_HOURS,
+  EXTENDED_HOURS_PER_DAY,
+  EXTENDED_DAYS_PER_WEEK,
+  EXTENDED_RETURN_BLOCK_HOURS,
+  EXTENDED_PRIORITY_RETURN_DAY,
+  EXTENDED_RETURN_UTILIZATION,
   LAYER_TOLERANCE_AGENTS,
   HHEE_MIN_DEFICIT_AGENTS,
   ACTIONS_CONFIG_STORAGE_KEY,
@@ -579,28 +582,22 @@ export default function ConfigPage() {
       {activeTab === "extendida" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="flex flex-col gap-6">
-            <Section title="Parámetros que sí puedes ajustar" icon="⏱️">
-              <RangeField
-                label="Horas máximas de extensión por día"
-                hint="Cuántas horas más, como máximo, se le puede sumar al horario estándar de un agente en un mismo día (ej: turno mañana 08:00-17:00 con 2h → 08:00-19:00). Un agente nunca recibe más de este tope en un solo día."
-                value={actionsConfig.extendedMaxHoursPerDay} min={1} max={6} step={1}
-                formatValue={v => `${v}h`}
-                onChange={v => updateConfig({ extendedMaxHoursPerDay: v })}
-              />
-              <RangeField
-                label="Máximo de días por semana con Jornada Extendida"
-                hint="Cuántos días distintos dentro de la semana puede recibir Jornada Extendida un mismo servicio/subárea. Nota: el sistema trabaja con conteos agregados de agentes, no con identidades individuales, así que este límite se aplica a nivel de servicio+subárea. Si hay más días con necesidad de extensión que este límite, se priorizan los días con mayor déficit. 7 = sin restricción (cualquier día de la semana puede extenderse)."
-                value={actionsConfig.extendedMaxDaysPerWeek} min={1} max={7} step={1}
-                formatValue={v => v >= 7 ? "Sin límite (7)" : `${v} día${v === 1 ? "" : "s"}`}
-                onChange={v => updateConfig({ extendedMaxDaysPerWeek: v })}
-              />
-              <p className="text-xs mt-1" style={{ color: "#94a3b8" }}>
+            <Section title="Regla de negocio (lógica corregida v2)" icon="⏱️">
+              <p className="text-xs" style={{ color: "#94a3b8" }}>
+                La estructura de la Jornada Extendida es fija y ya no se ajusta desde esta pantalla: siempre son <span style={{ color: "#cbd5e1", fontWeight: 600 }}>2 días</span> por semana, siempre <span style={{ color: "#cbd5e1", fontWeight: 600 }}>2 horas</span> de extensión por día. Solo el día de <span style={{ color: "#cbd5e1", fontWeight: 600 }}>mayor déficit</span> necesita tener déficit real — el segundo día completa el paquete obligatorio de 2 días aunque no tenga déficit ahí.
+              </p>
+              <p className="text-xs mt-2" style={{ color: "#94a3b8" }}>
+                Las 4 horas acumuladas se devuelven siempre en <span style={{ color: "#cbd5e1", fontWeight: 600 }}>un único bloque continuo de 4 horas</span>, posicionado en una de las <span style={{ color: "#cbd5e1", fontWeight: 600 }}>dos mitades fijas</span> del horario principal del turno (antes del break o después del break) — nunca en un corte que caiga a caballo del break, y nunca fragmentado. Se prioriza el Sábado. Si ninguna de las 2 mitades está completamente libre en ningún día, no se genera ninguna Jornada Extendida para ese servicio/subárea/turno.
+              </p>
+              <p className="text-xs mt-2" style={{ color: "#94a3b8" }}>
+                El número de agentes ya no sale solo del déficit del día que se extiende: también queda limitado por cuánto excedente REAL hay, en promedio, en la ventana exacta de devolución — se compromete como máximo el <span style={{ color: "#cbd5e1", fontWeight: 600 }}>80%</span> de ese promedio, dejando colchón. Si ese tope da 0 agentes, no se genera la Jornada Extendida.
+              </p>
+              <p className="text-xs mt-2" style={{ color: "#94a3b8" }}>
                 Además, Jornadas Extendidas usa directamente estos parámetros compartidos definidos en la pestaña <span style={{ color: "#3b82f6", fontWeight: 600 }}>General</span>:
               </p>
               <ul className="text-xs mt-2 flex flex-col gap-1.5" style={{ color: "#94a3b8" }}>
-                <li>• <span style={{ color: "#cbd5e1" }}>Déficit mínimo considerado</span> — filtra qué intervalos activan una extensión.</li>
-                <li>• <span style={{ color: "#cbd5e1" }}>Horarios de Turno Estándar</span> — el turno mañana/tarde que se extiende siempre parte de aquí.</li>
-                <li>• <span style={{ color: "#cbd5e1" }}>Granularidad de Horario</span> — el paso con el que se reparten las horas de extensión.</li>
+                <li>• <span style={{ color: "#cbd5e1" }}>Déficit mínimo considerado</span> — decide si hay necesidad genuina para generar la extensión.</li>
+                <li>• <span style={{ color: "#cbd5e1" }}>Horarios de Turno Estándar</span> — el turno mañana/tarde que se extiende siempre parte de aquí, y también define dónde caen las 2 mitades de devolución.</li>
               </ul>
               <p className="text-[11px] mt-3" style={{ color: "#f59e0b" }}>No arma una jornada nueva, solo extiende el horario estándar existente — pero SÍ depende de Jornada Laboral Estándar (pestaña General): si "Fin turno mañana/tarde" no coincide con Horas de trabajo + Horas de break, se recalcula automáticamente a partir de esa duración (ver aviso en General → Horarios de Turno Estándar).</p>
             </Section>
@@ -608,10 +605,14 @@ export default function ConfigPage() {
           <div className="flex flex-col gap-6">
             <Section title="Parámetros internos fijos" icon="🔒">
               <p className="text-[11px] -mt-2 mb-2" style={{ color: "#f59e0b" }}>
-                No editables desde esta pantalla: quedaron fijos en el código para no alterar el comportamiento ya validado del módulo Acciones. Se muestran aquí solo como referencia.
+                No editables desde esta pantalla: quedaron fijos en el código como reglas de negocio no negociables. Se muestran aquí solo como referencia.
               </p>
-              <InfoRow label="Ventana de detección de déficit cercano al borde" value={`${EDGE_WINDOW_HOURS}h`} />
-              <InfoRow label="Umbral de día libre completo" value={`${FULL_DAY_OFF_HOURS}h`} />
+              <InfoRow label="Horas de extensión por día" value={`${EXTENDED_HOURS_PER_DAY}h`} />
+              <InfoRow label="Días por semana con Jornada Extendida" value={`${EXTENDED_DAYS_PER_WEEK}`} />
+              <InfoRow label="Bloque continuo de devolución" value={`${EXTENDED_RETURN_BLOCK_HOURS}h`} />
+              <InfoRow label="Posición de la devolución" value="Antes o después del break (nunca a caballo)" />
+              <InfoRow label="Día priorizado para la devolución" value={EXTENDED_PRIORITY_RETURN_DAY} />
+              <InfoRow label="Utilización máxima del excedente en la devolución" value={`${EXTENDED_RETURN_UTILIZATION * 100}%`} />
             </Section>
           </div>
         </div>

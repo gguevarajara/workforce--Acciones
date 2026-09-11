@@ -1,17 +1,13 @@
 /**
- * Compensación semanal para Jornadas Extendidas.
+ * Bolsa semanal de excedente (GAP POSITIVO) para financiar Jornadas Extendidas.
  *
- * Regla: una extensión solo se puede proponer si existe, en la misma semana,
- * un volumen equivalente de GAP positivo que pueda devolverse dentro del
- * horario principal del agente.
- *
- * IMPORTANTE — dos correcciones respecto a la versión anterior:
+ * LÓGICA CORREGIDA (ver documento de lógica de Jornadas Extendidas):
  *
  * 1) Bolsa ÚNICA y COMPARTIDA por servicio/subárea (no una bolsa separada por
  *    turno). Las ventanas de turno mañana (08:00-17:00) y tarde (11:00-20:00)
  *    se solapan (11:00-17:00): las mismas horas de excedente NO pueden
  *    ofrecerse como devolución a un agente de mañana y, por separado, a uno
- *    de tarde — es el mismo personal excedente. `consumeCompensation`
+ *    de tarde — es el mismo personal excedente. `consumeReturnBlock`
  *    descuenta la bolsa compartida en cuanto se usa, sin importar qué turno
  *    la consumió primero (ver jornadasExtendidas.ts, que procesa mañana y
  *    tarde en orden fijo sobre la MISMA instancia de `blocks`).
@@ -20,21 +16,22 @@
  *    consumido de ese mismo intervalo al mover cobertura hacia un déficit
  *    (`surplusLedger`, poblado por cambioHorario.ts). Sin este descuento, el
  *    excedente se leía siempre de los datos originales y podía ofrecerse
- *    como devolución dos veces: una implícita (ya usada por Cambio de
- *    Horario) y otra explícita (ofrecida aquí).
+ *    como devolución dos veces.
  *
  * 3) El excedente se calcula con la MISMA Base de Cobertura (`coverageBase`)
- *    que el déficit (ver `getAvailableFromRow` en utils.ts), en vez de la
- *    columna "Oficiales" fija. Antes de esta corrección, el déficit que
- *    dispara una Jornada Extendida respetaba `coverageBase`, pero el
- *    excedente que la financia siempre se leía de "Oficiales" — dos partes
- *    del mismo cálculo usando bases distintas.
+ *    que el déficit (ver `getAvailableFromRow` en utils.ts).
+ *
+ * 4) LA DEVOLUCIÓN YA NO SE FRAGMENTA. La regla corregida exige que las 4
+ *    horas acumuladas (2 días × 2h) se devuelvan en UN ÚNICO bloque continuo
+ *    de exactamente `EXTENDED_RETURN_BLOCK_HOURS` horas, dentro del horario
+ *    principal del turno, priorizando el Sábado. Si ese bloque continuo no
+ *    existe, no hay devolución posible y, por regla de negocio, tampoco debe
+ *    generarse la Jornada Extendida (ver jornadasExtendidas.ts).
  */
 
 import type { Row } from "../types/analysis";
 import type { ActionsEngineConfig, SurplusLedger } from "./types";
 import { getPrincipalSchedule, type ShiftType } from "./scheduleCalculator";
-import { FULL_DAY_OFF_HOURS } from "./config";
 import { getAvailableFromRow, toHHMM, toMinutes } from "./utils";
 
 export interface CompensationRange {
@@ -60,110 +57,14 @@ export interface WeeklyCompensationPlan {
   blocks: CompensationBlock[];
 }
 
+/** Devolución continua consumida de la bolsa compartida (siempre UN único
+ *  tramo, nunca fragmentado — ver regla del bloque continuo de 4h). */
 export interface ConsumedCompensation {
   day: string;
+  fechaSort: string;
   start: string;
   end: string;
   hours: number;
-  isFullDayOff: boolean;
-}
-
-/**
- * Bloques de horas permitidos para una devolución. Nunca se debe devolver
- * una cantidad de horas seguidas que no sea una de estas (ej. 6h NO es
- * válido: debe salir como 4h, y el resto queda sin devolver ese día).
- * Orden descendente: siempre se prioriza el bloque más grande que quepa.
- */
-export const ALLOWED_COMPENSATION_BLOCK_HOURS = [8, 4, 2] as const;
-
-/** Minutos del mayor bloque permitido que cabe en `minutes` (0 si no cabe ni el menor). */
-function pickAllowedMinutes(minutes: number): number {
-  for (const h of ALLOWED_COMPENSATION_BLOCK_HOURS) {
-    if (minutes >= h * 60 - 0.001) return h * 60;
-  }
-  return 0;
-}
-
-/**
- * Unifica devoluciones de un mismo día que son contiguas en el tiempo (ej.
- * 11:00-13:00 + 13:00-15:00 → una sola de 11:00-15:00) en vez de mostrarlas
- * como tramos separados, y recorta el resultado al mayor bloque permitido
- * (`ALLOWED_COMPENSATION_BLOCK_HOURS`) si la unión da una cantidad de horas
- * no permitida (ej. 3×2h contiguas = 6h → se muestran solo 4h; el resto no
- * se le devuelve a todos los agentes ese día, de ahí el flag `capped`).
- *
- * Los días completos (`isFullDayOff`) no se fusionan por horario: se listan
- * aparte, una vez por día (8h ya es un bloque permitido).
- */
-export function mergeAndCapCompensation(
-  entries: ConsumedCompensation[]
-): { text: string; capped: boolean; realHours: number; shownHours: number } {
-  if (!entries.length) return { text: "Sin devolución disponible", capped: false, realHours: 0, shownHours: 0 };
-
-  const fullDayEntries = entries.filter(e => e.isFullDayOff);
-  const timedEntries = entries.filter(e => !e.isFullDayOff);
-
-  const parts: string[] = [];
-  let capped = false;
-  let realMinutes = 0;
-  let shownMinutes = 0;
-
-  const seenFullDays = new Set<string>();
-  for (const e of fullDayEntries) {
-    realMinutes += e.hours * 60;
-    if (seenFullDays.has(e.day)) continue;
-    seenFullDays.add(e.day);
-    parts.push(`${e.day} (Día libre)`);
-    shownMinutes += e.hours * 60;
-  }
-
-  const byDay = new Map<string, ConsumedCompensation[]>();
-  for (const e of timedEntries) {
-    const arr = byDay.get(e.day) ?? [];
-    arr.push(e);
-    byDay.set(e.day, arr);
-  }
-
-  for (const [day, dayEntries] of byDay) {
-    const sorted = [...dayEntries].sort((a, b) => toMinutes(a.start) - toMinutes(b.start));
-
-    // Fusiona tramos contiguos/solapados del mismo día en rangos únicos.
-    const merged: { start: number; end: number }[] = [];
-    for (const e of sorted) {
-      const start = toMinutes(e.start);
-      const end = toMinutes(e.end);
-      const last = merged[merged.length - 1];
-      if (last && start <= last.end + 0.001) {
-        last.end = Math.max(last.end, end);
-      } else {
-        merged.push({ start, end });
-      }
-    }
-
-    for (const range of merged) {
-      const durationMin = range.end - range.start;
-      realMinutes += durationMin;
-      const allowedMin = pickAllowedMinutes(durationMin);
-      if (allowedMin <= 0) {
-        // No alcanza ni el bloque mínimo permitido (2h): se muestra tal
-        // cual para no ocultar la devolución (no debería pasar si
-        // consumeCompensation ya restringe cada toma a bloques permitidos).
-        parts.push(`${day} (${toHHMM(range.start)}-${toHHMM(range.end)})`);
-        shownMinutes += durationMin;
-        continue;
-      }
-      if (allowedMin < durationMin - 0.001) capped = true;
-      parts.push(`${day} (${toHHMM(range.start)}-${toHHMM(range.start + allowedMin)})`);
-      shownMinutes += allowedMin;
-    }
-  }
-
-  return {
-    text: parts.length ? parts.join(", ") : "Sin devolución disponible",
-    capped,
-    realHours: realMinutes / 60,
-    shownHours: shownMinutes / 60,
-  };
 }
 
 interface RawPositiveBlock {
@@ -202,6 +103,13 @@ function getNetSurplusForRow(
   return Math.max(0, rawSurplus - consumed);
 }
 
+/**
+ * Arma los bloques CONTINUOS de excedente positivo de cada día (se corta el
+ * bloque en cuanto aparece un intervalo de 30' sin excedente neto). Esta es
+ * la base sobre la que luego se busca el GAP positivo continuo de 4h (ver
+ * `findContinuousReturnBlock`): un bloque nunca puede ser más largo de lo
+ * que realmente es continuo en los datos.
+ */
 function getPositiveBlocks(
   rows: Row[],
   coverageBase: ActionsEngineConfig["coverageBase"],
@@ -241,19 +149,15 @@ function getPositiveBlocks(
   return blocks;
 }
 
-function intersectRange(a: CompensationRange, b: CompensationRange): CompensationRange | null {
-  const start = Math.max(a.start, b.start);
-  const end = Math.min(a.end, b.end);
-  return end > start ? { start, end } : null;
-}
-
-function remainingMinutesOf(block: CompensationBlock): number {
-  return block.remaining.reduce((sum, r) => sum + (r.end - r.start), 0);
-}
+// (fin de utilidades geométricas de rango — la búsqueda de devolución ya no
+// necesita intersección arbitraria: solo comprueba si una ventana fija cabe
+// completa dentro de un remanente, ver findContinuousReturnBlock más abajo)
 
 /**
- * Identifica primero TODOS los gaps positivos de la semana (ya descontado lo
- * consumido por Cambio de Horario) y arma la bolsa ÚNICA compartida.
+ * Identifica primero TODOS los gaps positivos continuos de la semana (ya
+ * descontado lo consumido por Cambio de Horario) y arma la bolsa ÚNICA
+ * compartida. No aplica ninguna regla de tamaño de bloque acá: eso lo decide
+ * `findContinuousReturnBlock` en el momento de buscar devolución.
  */
 export function calculateWeeklyCompensationPlan(
   servicio: string,
@@ -279,111 +183,183 @@ export function calculateWeeklyCompensationPlan(
   return { totalAvailableHours, blocks };
 }
 
-/**
- * Horas de la bolsa compartida que HOY siguen siendo utilizables por el
- * turno indicado (intersección con su horario principal). Se recalcula
- * sobre el estado ACTUAL de `blocks`: si el turno mañana ya consumió parte
- * del solape 11:00-17:00, el turno tarde ve automáticamente menos horas
- * disponibles (y viceversa) — así se evita el doble conteo entre turnos.
- */
-export function availableHoursForShift(
-  blocks: CompensationBlock[],
-  shiftType: ShiftType,
-  config: ActionsEngineConfig
-): number {
-  const schedule = getPrincipalSchedule(shiftType, config);
-  let total = 0;
-  for (const block of blocks) {
-    for (const range of block.remaining) {
-      const overlap = intersectRange(range, schedule);
-      if (overlap) total += (overlap.end - overlap.start) / 60;
-    }
-  }
-  return total;
+export interface ContinuousReturnWindow {
+  fechaSort: string;
+  day: string;
+  start: number;
+  end: number;
 }
 
 /**
- * Consume horas de la bolsa COMPARTIDA para devolver `neededHours` a un
- * agente del turno `shiftType`, respetando su horario principal y evitando
- * devolver la misma fecha que se extiende (`excludeFechaSort`). Modifica `blocks`
- * IN-PLACE: lo consumido aquí deja de estar disponible para cualquier otra
- * devolución, sea del mismo turno o del turno contrario.
+ * Las dos únicas posiciones válidas para la devolución dentro del horario
+ * principal de un turno: la primera mitad (antes del break) o la segunda
+ * mitad (después del break). No se admite ningún otro corte.
  *
- * Prioriza los bloques con más excedente remanente primero, para preferir
- * consolidar la devolución en la menor cantidad de días posible (regla del
- * documento: preferir 4 u 8 horas seguidas en vez de fragmentar en muchos
- * días pequeños).
+ * Ej: horario 08:00-17:00 (break de por medio) → [08:00-12:00, 13:00-17:00].
+ * Ej: horario 09:00-18:00 → [09:00-13:00, 14:00-18:00].
+ * Ej: horario 11:00-20:00 → [11:00-15:00, 16:00-20:00].
+ *
+ * El hueco entre ambas mitades queda siempre disponible para que el agente
+ * gestione — es donde cae su break — y nunca se ofrece como devolución.
  */
-export function consumeCompensation(
+export function getReturnHalfWindows(
+  shiftType: ShiftType,
+  config: ActionsEngineConfig,
+  requiredHours: number
+): [CompensationRange, CompensationRange] {
+  const schedule = getPrincipalSchedule(shiftType, config);
+  const blockMin = requiredHours * 60;
+  return [
+    { start: schedule.start, end: schedule.start + blockMin },
+    { start: schedule.end - blockMin, end: schedule.end },
+  ];
+}
+
+/**
+ * Busca, dentro de la bolsa compartida de excedente semanal, cuál de las DOS
+ * ventanas fijas de devolución (`getReturnHalfWindows`: primera mitad o
+ * segunda mitad del horario principal, separadas por el break) está
+ * COMPLETAMENTE disponible — ni un minuto de esa ventana puede tener
+ * déficit. No se acepta ningún otro corte de 4h: la devolución nunca cae,
+ * por ejemplo, a caballo del break.
+ *
+ * Prioriza el día `priorityDay` (Sábado): si Sábado tiene alguna de las dos
+ * ventanas completamente libre, se usa esa sin mirar el resto de la semana
+ * (se prefiere la primera mitad si ambas están libres). Si el Sábado no
+ * alcanza, se evalúan los demás días en orden de fecha y se toma la primera
+ * ventana que califique.
+ *
+ * `excludeFechaSorts` excluye los días que están siendo extendidos: un día
+ * no puede ser, a la vez, uno de los 2 días con Jornada Extendida y el día
+ * de devolución de esa misma extensión.
+ *
+ * Devuelve la ventana EXACTA a consumir (siempre una de las dos fijas), o
+ * `null` si ningún día tiene ninguna de las dos completamente libre — en
+ * cuyo caso, por regla de negocio, no debe generarse la Jornada Extendida.
+ */
+export function findContinuousReturnBlock(
   blocks: CompensationBlock[],
   shiftType: ShiftType,
   config: ActionsEngineConfig,
-  neededHours: number,
-  excludeFechaSort: string
-): ConsumedCompensation[] {
-  const schedule = getPrincipalSchedule(shiftType, config);
-  const consumed: ConsumedCompensation[] = [];
-  let remainingNeeded = neededHours * 60;
+  requiredHours: number,
+  priorityDay: string,
+  excludeFechaSorts: Set<string>
+): ContinuousReturnWindow | null {
+  const halves = getReturnHalfWindows(shiftType, config, requiredHours);
 
-  const sortedBlocks = [...blocks].sort((a, b) => remainingMinutesOf(b) - remainingMinutesOf(a));
+  interface Candidate extends ContinuousReturnWindow {
+    halfIndex: number;
+  }
+  const candidates: Candidate[] = [];
 
-  for (const block of sortedBlocks) {
-    if (remainingNeeded <= 0.001) break;
-    if (block.fechaSort === excludeFechaSort) continue;
+  for (const block of blocks) {
+    if (excludeFechaSorts.has(block.fechaSort)) continue;
 
-    const beforeMinutes = remainingMinutesOf(block);
-    const blockConsumedRanges: CompensationRange[] = [];
+    for (let halfIndex = 0; halfIndex < halves.length; halfIndex++) {
+      const half = halves[halfIndex];
+      // La ventana fija debe caer ENTERA dentro de un único sub-rango
+      // remanente: no se admite que una parte de la ventana tenga déficit.
+      const fits = block.remaining.some(r => r.start <= half.start + 0.001 && r.end >= half.end - 0.001);
+      if (!fits) continue;
 
-    for (let i = 0; i < block.remaining.length && remainingNeeded > 0.001; i++) {
-      const range = block.remaining[i];
-      const overlap = intersectRange(range, schedule);
-      if (!overlap) continue;
-
-      const take = pickAllowedMinutes(Math.min(remainingNeeded, overlap.end - overlap.start));
-      if (take <= 0.001) continue;
-
-      const consumeStart = overlap.start;
-      const consumeEnd = overlap.start + take;
-
-      // Fragmentar el rango: lo que queda antes y después de lo consumido.
-      const leftovers: CompensationRange[] = [];
-      if (range.start < consumeStart) leftovers.push({ start: range.start, end: consumeStart });
-      if (consumeEnd < range.end) leftovers.push({ start: consumeEnd, end: range.end });
-      block.remaining.splice(i, 1, ...leftovers);
-      i += leftovers.length - 1; // reacomodar el índice tras la fragmentación
-
-      blockConsumedRanges.push({ start: consumeStart, end: consumeEnd });
-      remainingNeeded -= take;
-    }
-
-    if (!blockConsumedRanges.length) continue;
-
-    const blockTakenMinutes = blockConsumedRanges.reduce((s, r) => s + (r.end - r.start), 0);
-    const isFullDayOff =
-      block.totalHours >= FULL_DAY_OFF_HOURS &&
-      remainingMinutesOf(block) <= 0.001 &&
-      blockTakenMinutes >= beforeMinutes - 0.001;
-
-    if (isFullDayOff) {
-      consumed.push({
-        day: block.day,
-        start: toHHMM(blockConsumedRanges[0].start),
-        end: toHHMM(blockConsumedRanges[blockConsumedRanges.length - 1].end),
-        hours: blockTakenMinutes / 60,
-        isFullDayOff: true,
-      });
-    } else {
-      for (const r of blockConsumedRanges) {
-        consumed.push({
-          day: block.day,
-          start: toHHMM(r.start),
-          end: toHHMM(r.end),
-          hours: (r.end - r.start) / 60,
-          isFullDayOff: false,
-        });
-      }
+      candidates.push({ fechaSort: block.fechaSort, day: block.day, start: half.start, end: half.end, halfIndex });
     }
   }
 
-  return consumed;
+  if (!candidates.length) return null;
+
+  const onPriorityDay = candidates.filter(c => c.day === priorityDay);
+  const pool = onPriorityDay.length ? onPriorityDay : candidates;
+
+  // Determinista: se prefiere la primera mitad sobre la segunda; a igualdad,
+  // la fecha más temprana.
+  pool.sort((a, b) => a.halfIndex - b.halfIndex || a.fechaSort.localeCompare(b.fechaSort));
+
+  const { fechaSort, day, start, end } = pool[0];
+  return { fechaSort, day, start, end };
+}
+
+/**
+ * Consume EXACTAMENTE el rango [start,end) del día `fechaSort` de la bolsa
+ * compartida (in-place). Se usa siempre sobre una ventana ya validada por
+ * `findContinuousReturnBlock`, así que el rango buscado siempre debe caer
+ * dentro de un único sub-rango de `block.remaining` sin fragmentarse en
+ * varios — si por algún motivo no calza (estado inconsistente), no se
+ * consume nada y se devuelve `null` en vez de fragmentar la devolución.
+ */
+export function consumeReturnBlock(
+  blocks: CompensationBlock[],
+  fechaSort: string,
+  start: number,
+  end: number
+): ConsumedCompensation | null {
+  // OJO: un mismo día puede tener VARIOS bloques de excedente disjuntos (ej.
+  // un excedente breve a primera hora y otro grande más tarde, separados por
+  // un tramo con déficit en el medio). No alcanza con matchear por
+  // `fechaSort`: hay que ubicar el bloque específico cuyo remanente contiene
+  // efectivamente el rango [start,end) — si se toma "el primero de esa
+  // fecha" a secas, se puede agarrar un bloque que ni siquiera cubre la
+  // ventana, y la devolución termina descartándose por error.
+  const block = blocks.find(
+    b => b.fechaSort === fechaSort && b.remaining.some(r => r.start <= start + 0.001 && r.end >= end - 0.001)
+  );
+  if (!block) return null;
+
+  const idx = block.remaining.findIndex(r => r.start <= start + 0.001 && r.end >= end - 0.001);
+  if (idx === -1) return null;
+
+  const range = block.remaining[idx];
+  const leftovers: CompensationRange[] = [];
+  if (range.start < start) leftovers.push({ start: range.start, end: start });
+  if (end < range.end) leftovers.push({ start: end, end: range.end });
+  block.remaining.splice(idx, 1, ...leftovers);
+
+  return {
+    day: block.day,
+    fechaSort,
+    start: toHHMM(start),
+    end: toHHMM(end),
+    hours: (end - start) / 60,
+  };
+}
+
+/** Texto legible de una devolución continua ya consumida, ej. "Sábado (12:00-16:00)". */
+export function formatReturnBlock(consumed: ConsumedCompensation): string {
+  return `${consumed.day} (${consumed.start}-${consumed.end})`;
+}
+
+/**
+ * Cuántos agentes, en promedio, sobran REALMENTE durante una ventana exacta
+ * (ej. la ventana de devolución ya encontrada) — neto de lo que Cambio de
+ * Horario ya haya consumido de esos mismos intervalos.
+ *
+ * `findContinuousReturnBlock` solo garantiza que la ventana está libre de
+ * déficit (una condición binaria: ningún intervalo en negativo). Pero eso no
+ * dice CUÁNTOS agentes puede realmente absorber esa ventana sin quedar en
+ * déficit — si el excedente ahí es de apenas 2 agentes en promedio, no se
+ * puede prometer una Jornada Extendida de 17 agentes solo porque la ventana
+ * "está libre". Este promedio es la base para ese tope real (ver
+ * `EXTENDED_RETURN_UTILIZATION` en config.ts y su uso en jornadasExtendidas.ts).
+ */
+export function getAverageAvailableAgents(
+  servicio: string,
+  subarea: string,
+  serviceRows: Row[],
+  fechaSort: string,
+  startMin: number,
+  endMin: number,
+  coverageBase: ActionsEngineConfig["coverageBase"],
+  surplusLedger?: SurplusLedger
+): number {
+  const rows = serviceRows.filter(
+    r => r.servicio === servicio &&
+         r.subarea === subarea &&
+         r.fechaSort === fechaSort &&
+         toMinutes(r.hora) >= startMin &&
+         toMinutes(r.hora) < endMin
+  );
+  if (!rows.length) return 0;
+
+  const total = rows.reduce((sum, r) => sum + Math.max(0, getNetSurplusForRow(r, coverageBase, surplusLedger)), 0);
+  return total / rows.length;
 }
